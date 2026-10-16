@@ -1,0 +1,493 @@
+@page "/"
+@using GymManagement.Core
+@using GymManagement.Infrastructure
+@using Microsoft.EntityFrameworkCore
+@inject GymDbContext DbContext
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Dashboard - Gym Management</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="row mb-4 align-items-center">
+        <div class="col-md-6">
+            <h2>Directorio de Socios</h2>
+        </div>
+        <div class="col-md-6 text-end">
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalNuevoRegistro" aria-label="Registrar nuevo socio" @onclick="PrepararNuevoRegistro">
+                <i class="bi bi-person-plus-fill"></i> Nuevo Registro
+            </button>
+        </div>
+    </div>
+
+    <div class="row mb-3">
+        <div class="col-md-8">
+            <input type="text" class="form-control" placeholder="Buscar por nombre o teléfono..." @bind="terminoBusqueda" @bind:event="oninput" />
+        </div>
+        <div class="col-md-4">
+            <select class="form-select" @bind="filtroEstado">
+                <option value="Todos">Todos</option>
+                <option value="Activo">Activos</option>
+                <option value="Vencido">Vencidos</option>
+                <option value="Pendiente">Pendientes</option>
+                <option value="Inactivo">Inactivos</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-hover table-striped align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th>ID</th>
+                    <th>Nombre</th>
+                    <th>Teléfono</th>
+                    <th>Estado</th>
+                    <th>Fecha Vencimiento</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (socios == null)
+                {
+                    <tr>
+                        <td colspan="6" class="text-center">Cargando datos...</td>
+                    </tr>
+                }
+                else if (!sociosFiltrados.Any())
+                {
+                    <tr>
+                        <td colspan="6" class="text-center">No se encontraron socios.</td>
+                    </tr>
+                }
+                else
+                {
+                    @foreach (var socio in sociosFiltrados)
+                    {
+                        <tr>
+                            <td>@socio.Id_Usuario</td>
+                            <td>@socio.Nombre @socio.Apellidos</td>
+                            <td>@socio.Telefono</td>
+                            <td>
+                                <span class="badge @ObtenerClaseBadge(socio.Estado)">
+                                    @socio.Estado
+                                </span>
+                            </td>
+                            <td>
+                                @{
+                                    var ultimoPago = socio.PagosMembresias.OrderByDescending(p => p.FechaVencimiento).FirstOrDefault();
+                                    if (ultimoPago != null)
+                                    {
+                                        <span>@ultimoPago.FechaVencimiento.ToShortDateString()</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">Sin pagos</span>
+                                    }
+                                }
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#modalDetallesSocio" @onclick="() => AbrirDetalles(socio)" aria-label="Ver detalles de @socio.Nombre">Ver Detalles</button>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Registro de socios -->
+<div class="modal fade" id="modalNuevoRegistro" tabindex="-1" aria-labelledby="modalNuevoRegistroLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalNuevoRegistroLabel">Registrar Nuevo Socio</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div class="alert alert-danger">@errorMessage</div>
+                }
+
+                <EditForm Model="nuevoCliente" OnValidSubmit="GuardarNuevoSocio">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+
+                    <h6 class="mb-3 border-bottom pb-2">Datos Personales</h6>
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <label class="form-label">Nombre</label>
+                            <InputText class="form-control" @bind-Value="nuevoCliente.Nombre" required />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Apellidos</label>
+                            <InputText class="form-control" @bind-Value="nuevoCliente.Apellidos" required />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Teléfono</label>
+                            <InputText class="form-control" @bind-Value="nuevoCliente.Telefono" type="tel" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '')" required />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Fecha de Nacimiento</label>
+                            <InputDate class="form-control" @bind-Value="nuevoCliente.FechaNacimiento" required />
+                        </div>
+                    </div>
+
+                    <h6 class="mb-3 border-bottom pb-2">Primer Pago / Membresía</h6>
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <label class="form-label">Tipo de Membresía</label>
+                            <InputSelect class="form-select" @bind-Value="nuevoPago.TipoMembresia" required>
+                                <option value="">Seleccione...</option>
+                                <option value="Diario">Diario</option>
+                                <option value="Semanal">Semanal</option>
+                                <option value="Quincenal">Quincenal</option>
+                                <option value="Mensual">Mensual</option>
+                                <option value="Anual">Anual</option>
+                            </InputSelect>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Monto</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-white border-end-0 text-muted pe-1">$</span>
+                                <InputNumber class="form-control border-start-0 ps-1" @bind-Value="nuevoPago.Monto" min="0" step="any" onfocus="this.select()" oninput="this.value = this.value.replace(/[^0-9.]/g, '')" required />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-footer px-0 pb-0">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" @onclick="PrepararNuevoRegistro">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Guardar Socio</button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Detalles del socio -->
+<div class="modal fade" id="modalDetallesSocio" tabindex="-1" aria-labelledby="modalDetallesSocioLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalDetallesSocioLabel">Detalles del Socio</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div class="alert alert-danger">@errorMessage</div>
+                }
+
+                @if (clienteEdicion != null)
+                {
+                    <EditForm Model="clienteEdicion" OnValidSubmit="ActualizarSocio">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Nombre</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="bi bi-pencil"></i></span>
+                                    <InputText class="form-control" @bind-Value="clienteEdicion.Nombre" required />
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Apellidos</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="bi bi-pencil"></i></span>
+                                    <InputText class="form-control" @bind-Value="clienteEdicion.Apellidos" required />
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Teléfono</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="bi bi-pencil"></i></span>
+                                    <InputText class="form-control" @bind-Value="clienteEdicion.Telefono" type="tel" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '')" required />
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Estado</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="bi bi-pencil"></i></span>
+                                    <InputSelect class="form-select" @bind-Value="clienteEdicion.Estado" required>
+                                        <option value="Activo">Activo</option>
+                                        <option value="Vencido">Vencido</option>
+                                        <option value="Pendiente">Pendiente</option>
+                                        <option value="Inactivo">Inactivo</option>
+                                    </InputSelect>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Fecha de Nacimiento</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="bi bi-pencil"></i></span>
+                                    <InputDate class="form-control" @bind-Value="clienteEdicion.FechaNacimiento" required />
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted">Fecha de Registro</label>
+                                <InputDate class="form-control text-muted" @bind-Value="clienteEdicion.FechaRegistro" disabled />
+                            </div>
+                            @if (ultimoPagoEdicion != null)
+                            {
+                                <div class="col-md-6">
+                                    <label class="form-label">Tipo Membresía</label>
+                                    <div class="input-group">
+                                        <span class="input-group-text"><i class="bi bi-pencil"></i></span>
+                                        <InputSelect class="form-select" @bind-Value="ultimoPagoEdicion.TipoMembresia" required>
+                                            <option value="Diario">Diario</option>
+                                            <option value="Semanal">Semanal</option>
+                                            <option value="Quincenal">Quincenal</option>
+                                            <option value="Mensual">Mensual</option>
+                                            <option value="Anual">Anual</option>
+                                        </InputSelect>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Monto (Último Pago)</label>
+                                    <div class="input-group">
+                                        <span class="input-group-text"><i class="bi bi-pencil"></i></span>
+                                        <span class="input-group-text bg-white border-end-0 text-muted pe-1">$</span>
+                                        <InputNumber class="form-control border-start-0 ps-1" @bind-Value="ultimoPagoEdicion.Monto" min="0" step="any" onfocus="this.select()" oninput="this.value = this.value.replace(/[^0-9.]/g, '')" required />
+                                    </div>
+                                </div>
+                            }
+                        </div>
+
+                        <div class="modal-footer px-0 pb-0 mt-4">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                            <button type="submit" class="btn btn-success" disabled="@(cooldownSegundosRestantes > 0)">Guardar y cerrar</button>
+                        </div>
+                    </EditForm>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<Cliente> socios;
+    private string terminoBusqueda = "";
+    private string filtroEstado = "Todos";
+    private string errorMessage = "";
+
+    private Cliente clienteEdicion;
+    private PagoMembresia ultimoPagoEdicion;
+    private Dictionary<int, DateTime> ultimosCambiosSocio = new();
+
+    private int cooldownSegundosRestantes = 0;
+    private CancellationTokenSource? countdownCts;
+
+    private Cliente nuevoCliente = new Cliente { FechaNacimiento = DateTime.Today.AddYears(-18), Estado = "Activo" };
+    private PagoMembresia nuevoPago = new PagoMembresia();
+
+    private IEnumerable<Cliente> sociosFiltrados => socios?
+        .Where(s =>
+            (filtroEstado == "Todos" || s.Estado == filtroEstado) &&
+            (string.IsNullOrWhiteSpace(terminoBusqueda) ||
+             s.Nombre.Contains(terminoBusqueda, StringComparison.OrdinalIgnoreCase) ||
+             s.Telefono.Contains(terminoBusqueda, StringComparison.OrdinalIgnoreCase))) ?? new List<Cliente>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            socios = await DbContext.Clientes
+                .Include(c => c.PagosMembresias)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error al cargar datos: {ex.Message}");
+            socios = new List<Cliente>();
+        }
+    }
+
+    private string ObtenerClaseBadge(string estado)
+    {
+        return estado switch
+        {
+            "Activo" => "bg-success",
+            "Vencido" => "bg-danger",
+            "Pendiente" => "bg-warning text-dark",
+            "Inactivo" => "bg-secondary",
+            _ => "bg-light text-dark"
+        };
+    }
+
+    private async Task GuardarNuevoSocio()
+    {
+        try
+        {
+            errorMessage = "";
+            var fechaActual = DateTime.UtcNow; // PostgreSQL timestamptz requiere UTC
+
+            nuevoCliente.FechaRegistro = fechaActual;
+            nuevoCliente.Estado = "Activo";
+
+            nuevoPago.FechaPago = fechaActual;
+            nuevoPago.FechaInicio = fechaActual.Date;
+
+            nuevoPago.FechaVencimiento = nuevoPago.TipoMembresia switch
+            {
+                "Diario" => nuevoPago.FechaInicio.AddDays(1),
+                "Semanal" => nuevoPago.FechaInicio.AddDays(7),
+                "Quincenal" => nuevoPago.FechaInicio.AddDays(15),
+                "Mensual" => nuevoPago.FechaInicio.AddMonths(1),
+                "Anual" => nuevoPago.FechaInicio.AddYears(1),
+                _ => nuevoPago.FechaInicio.AddMonths(1)
+            };
+
+            nuevoCliente.PagosMembresias.Add(nuevoPago);
+
+            DbContext.Clientes.Add(nuevoCliente);
+            await DbContext.SaveChangesAsync();
+
+            socios = await DbContext.Clientes.Include(c => c.PagosMembresias).ToListAsync();
+
+            PrepararNuevoRegistro();
+
+            await JSRuntime.InvokeVoidAsync("cerrarModal", "modalNuevoRegistro");
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error al guardar: {ex.Message}";
+            if (ex.InnerException != null)
+            {
+                errorMessage += $" | Detalles: {ex.InnerException.Message}";
+            }
+            Console.WriteLine(errorMessage);
+        }
+    }
+
+    private void PrepararNuevoRegistro()
+    {
+        errorMessage = "";
+        nuevoCliente = new Cliente { FechaNacimiento = DateTime.Today.AddYears(-18), Estado = "Activo" };
+        nuevoPago = new PagoMembresia { TipoMembresia = "Mensual" };
+    }
+
+    private void AbrirDetalles(Cliente socio)
+    {
+        errorMessage = "";
+        cooldownSegundosRestantes = 0;
+        countdownCts?.Cancel();
+
+        if (ultimosCambiosSocio.TryGetValue(socio.Id_Usuario, out var ultimoCambio))
+        {
+            var segundosTranscurridos = (DateTime.UtcNow - ultimoCambio).TotalSeconds;
+            if (segundosTranscurridos < 10)
+            {
+                cooldownSegundosRestantes = (int)Math.Ceiling(10 - segundosTranscurridos);
+                errorMessage = $"Espere {cooldownSegundosRestantes} segundos para hacer otro cambio en este socio.";
+                IniciarCountdown();
+            }
+        }
+
+        clienteEdicion = new Cliente
+        {
+            Id_Usuario = socio.Id_Usuario,
+            Nombre = socio.Nombre ?? "",
+            Apellidos = socio.Apellidos ?? "",
+            Telefono = socio.Telefono ?? "",
+            FechaNacimiento = socio.FechaNacimiento,
+            FechaRegistro = socio.FechaRegistro,
+            Estado = socio.Estado ?? "Activo"
+        };
+
+        var ultimoPago = socio.PagosMembresias?.OrderByDescending(p => p.FechaVencimiento).FirstOrDefault();
+        if (ultimoPago != null)
+        {
+            ultimoPagoEdicion = new PagoMembresia
+            {
+                Id_Mensualidad = ultimoPago.Id_Mensualidad,
+                Monto = ultimoPago.Monto,
+                TipoMembresia = ultimoPago.TipoMembresia
+            };
+        }
+        else
+        {
+            ultimoPagoEdicion = null;
+        }
+    }
+
+    private async Task ActualizarSocio()
+    {
+        if (cooldownSegundosRestantes > 0) return;
+
+        try
+        {
+            errorMessage = "";
+            var socioBd = await DbContext.Clientes.FindAsync(clienteEdicion.Id_Usuario);
+            if (socioBd != null)
+            {
+                socioBd.Nombre = clienteEdicion.Nombre;
+                socioBd.Apellidos = clienteEdicion.Apellidos;
+                socioBd.Telefono = clienteEdicion.Telefono;
+                socioBd.Estado = clienteEdicion.Estado;
+                socioBd.FechaNacimiento = clienteEdicion.FechaNacimiento;
+
+                if (ultimoPagoEdicion != null)
+                {
+                    var pagoBd = await DbContext.PagosMembresia.FindAsync(ultimoPagoEdicion.Id_Mensualidad);
+                    if (pagoBd != null)
+                    {
+                        pagoBd.Monto = ultimoPagoEdicion.Monto;
+                        pagoBd.TipoMembresia = ultimoPagoEdicion.TipoMembresia;
+                    }
+                }
+
+                await DbContext.SaveChangesAsync();
+
+                ultimosCambiosSocio[clienteEdicion.Id_Usuario] = DateTime.UtcNow;
+
+                socios = await DbContext.Clientes.Include(c => c.PagosMembresias).ToListAsync();
+
+                await JSRuntime.InvokeVoidAsync("cerrarModal", "modalDetallesSocio");
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error al actualizar: {ex.Message}";
+            if (ex.InnerException != null) errorMessage += $" | Detalles: {ex.InnerException.Message}";
+            Console.WriteLine(errorMessage);
+        }
+    }
+
+    private void IniciarCountdown()
+    {
+        countdownCts?.Cancel();
+        countdownCts = new CancellationTokenSource();
+        _ = RunCountdown(countdownCts.Token);
+    }
+
+    private async Task RunCountdown(CancellationToken token)
+    {
+        try
+        {
+            while (cooldownSegundosRestantes > 0 && !token.IsCancellationRequested)
+            {
+                await Task.Delay(1000, token);
+                cooldownSegundosRestantes--;
+
+                if (cooldownSegundosRestantes <= 0)
+                {
+                    cooldownSegundosRestantes = 0;
+                    errorMessage = "";
+                }
+                else
+                {
+                    errorMessage = $"Espere {cooldownSegundosRestantes} segundos para hacer otro cambio en este socio.";
+                }
+
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (TaskCanceledException)
+        {
+        }
+    }
+}
